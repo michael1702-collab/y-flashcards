@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>日文單字學習 App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { -webkit-tap-highlight-color: transparent; font-family: -apple-system, sans-serif; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body class="bg-slate-50">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useCallback, useMemo } = React;
+        const Icon = ({ name, size = 24, className = "" }) => {
+            useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [name]);
+            return <i data-lucide={name} style={{width: size, height: size}} className={className}></i>;
+        };
+
+        function App() {
+            const [queue, setQueue] = useState([]);
+            const [totalCards, setTotalCards] = useState(0);
+            const [stats, setStats] = useState({ again: 0, hard: 0, good: 0, easy: 0 });
+            const [isFlipped, setIsFlipped] = useState(false);
+
+            useEffect(() => {
+                const saved = localStorage.getItem('flashcards_state');
+                if (saved) {
+                    const d = JSON.parse(saved);
+                    setQueue(d.queue); setTotalCards(d.totalCards); setStats(d.stats);
+                }
+            }, []);
+
+            useEffect(() => {
+                if (totalCards > 0) localStorage.setItem('flashcards_state', JSON.stringify({ queue, totalCards, stats }));
+            }, [queue, totalCards, stats]);
+
+            const parseCSV = (text) => {
+                const lines = text.split('\n');
+                return lines.filter(l => l.includes(',')).map(line => {
+                    const idx = line.indexOf(',');
+                    return { front: line.substring(0, idx).trim(), back: line.substring(idx + 1).trim().replace(/^"|"$/g, '').replace(/""/g, '"') };
+                });
+            };
+
+            const speak = useCallback((text) => {
+                if (!text || !window.speechSynthesis) return;
+                window.speechSynthesis.cancel();
+                const u = new SpeechSynthesisUtterance(text);
+                u.lang = 'ja-JP';
+                window.speechSynthesis.speak(u);
+            }, []);
+
+            const handleFileUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    const parsed = parseCSV(ev.target.result);
+                    if (parsed.length > 0) { setQueue(parsed); setTotalCards(parsed.length); setStats({ again: 0, hard: 0, good: 0, easy: 0 }); setIsFlipped(false); }
+                };
+                reader.readAsText(file, 'UTF-8');
+            };
+
+            const currentCard = queue[0];
+            useEffect(() => {
+                if (currentCard) speak(isFlipped ? currentCard.back.split('{')[0] : currentCard.front);
+            }, [currentCard, isFlipped, speak]);
+
+            const handleSrs = (action) => {
+                const card = queue[0];
+                const next = queue.slice(1);
+                setStats(s => ({ ...s, [action]: s[action] + 1 }));
+                if (action === 'again') next.splice(1, 0, card);
+                else if (action === 'hard') next.splice(Math.floor(next.length / 2), 0, card);
+                else if (action === 'good') next.push(card);
+                setQueue(next); setIsFlipped(false);
+            };
+
+            if (totalCards === 0) return (
+                <div className="flex flex-col items-center justify-center min-h-screen p-6">
+                    <h1 className="text-2xl font-bold mb-6 text-slate-800">日文單字學習 App</h1>
+                    <label className="bg-indigo-600 text-white px-8 py-4 rounded-2xl font-bold shadow-lg cursor-pointer">
+                        匯入 CSV 開始學習
+                        <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
+                    </label>
+                </div>
+            );
+
+            return (
+                <div className="max-w-md mx-auto p-4 min-h-screen flex flex-col">
+                    <div className="flex items-center gap-3 mb-4 bg-white p-3 rounded-xl shadow-sm border">
+                        <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                            <div className="h-full bg-indigo-500 transition-all" style={{ width: `${((totalCards - queue.length) / totalCards) * 100}%` }} />
+                        </div>
+                        <label className="text-indigo-500"><Icon name="upload" size={20} /><input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} /></label>
+                    </div>
+                    {queue.length > 0 ? (
+                        <div onClick={() => setIsFlipped(!isFlipped)} className="flex-1 bg-white rounded-3xl shadow-xl border p-8 flex flex-col items-center justify-center text-center relative active:scale-95 transition-transform">
+                            {!isFlipped ? (
+                                <div className="space-y-4">
+                                    <h2 className="text-5xl font-black">{currentCard.front}</h2>
+                                    <Icon name="volume-2" className="text-indigo-300 mx-auto" />
+                                </div>
+                            ) : (
+                                <div className="flex flex-col h-full w-full">
+                                    <div className="flex-1 flex items-center justify-center text-xl text-slate-700 whitespace-pre-wrap">{currentCard.back.replace(/{.*?}/g, '')}</div>
+                                    <div className="grid grid-cols-2 gap-2 mt-4">
+                                        {['again', 'hard', 'good', 'easy'].map(a => <button key={a} onClick={(e) => { e.stopPropagation(); handleSrs(a); }} className="py-4 rounded-xl font-bold bg-slate-50 border capitalize active:bg-slate-100">{a}</button>)}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    ) : (
+                        <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center">
+                            <Icon name="check-circle" size={64} className="text-green-500" />
+                            <h2 className="text-xl font-bold">複習完了！</h2>
+                            <button onClick={() => { localStorage.clear(); location.reload(); }} className="text-indigo-500">清除進度重來</button>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
