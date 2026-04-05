@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>日文單字學習 App</title>
+    <title>日文單字 App</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -12,12 +12,13 @@
     <style>
         body { -webkit-tap-highlight-color: transparent; font-family: -apple-system, sans-serif; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
+        .card-min-h { min-height: 350px; }
     </style>
 </head>
 <body class="bg-slate-50">
     <div id="root"></div>
     <script type="text/babel">
-        const { useState, useEffect, useCallback, useMemo } = React;
+        const { useState, useEffect, useCallback } = React;
         const Icon = ({ name, size = 24, className = "" }) => {
             useEffect(() => { if (window.lucide) window.lucide.createIcons(); }, [name]);
             return <i data-lucide={name} style={{width: size, height: size}} className={className}></i>;
@@ -30,29 +31,36 @@
             const [isFlipped, setIsFlipped] = useState(false);
 
             useEffect(() => {
-                const saved = localStorage.getItem('flashcards_state');
+                const saved = localStorage.getItem('v2_flashcards');
                 if (saved) {
                     const d = JSON.parse(saved);
-                    setQueue(d.queue); setTotalCards(d.totalCards); setStats(d.stats);
+                    setQueue(d.queue || []); setTotalCards(d.totalCards || 0); setStats(d.stats || {again:0,hard:0,good:0,easy:0});
                 }
             }, []);
 
             useEffect(() => {
-                if (totalCards > 0) localStorage.setItem('flashcards_state', JSON.stringify({ queue, totalCards, stats }));
+                if (totalCards > 0) localStorage.setItem('v2_flashcards', JSON.stringify({ queue, totalCards, stats }));
             }, [queue, totalCards, stats]);
 
             const parseCSV = (text) => {
-                const lines = text.split('\n');
-                return lines.filter(l => l.includes(',')).map(line => {
+                const lines = text.split(/\r?\n/);
+                const result = [];
+                lines.forEach(line => {
                     const idx = line.indexOf(',');
-                    return { front: line.substring(0, idx).trim(), back: line.substring(idx + 1).trim().replace(/^"|"$/g, '').replace(/""/g, '"') };
+                    if (idx !== -1) {
+                        let front = line.substring(0, idx).trim();
+                        let back = line.substring(idx + 1).trim();
+                        back = back.replace(/^"|"$/g, '').replace(/""/g, '"');
+                        if (front) result.push({ front, back });
+                    }
                 });
+                return result;
             };
 
             const speak = useCallback((text) => {
                 if (!text || !window.speechSynthesis) return;
                 window.speechSynthesis.cancel();
-                const u = new SpeechSynthesisUtterance(text);
+                const u = new SpeechSynthesisUtterance(text.split('{')[0].trim());
                 u.lang = 'ja-JP';
                 window.speechSynthesis.speak(u);
             }, []);
@@ -63,65 +71,88 @@
                 const reader = new FileReader();
                 reader.onload = (ev) => {
                     const parsed = parseCSV(ev.target.result);
-                    if (parsed.length > 0) { setQueue(parsed); setTotalCards(parsed.length); setStats({ again: 0, hard: 0, good: 0, easy: 0 }); setIsFlipped(false); }
+                    if (parsed.length > 0) {
+                        setQueue(parsed); setTotalCards(parsed.length);
+                        setStats({ again: 0, hard: 0, good: 0, easy: 0 });
+                        setIsFlipped(false);
+                    }
                 };
                 reader.readAsText(file, 'UTF-8');
             };
 
             const currentCard = queue[0];
+            
+            // 翻面或切換卡片時發音
             useEffect(() => {
-                if (currentCard) speak(isFlipped ? currentCard.back.split('{')[0] : currentCard.front);
+                if (currentCard) {
+                    const text = isFlipped ? currentCard.back : currentCard.front;
+                    speak(text);
+                }
             }, [currentCard, isFlipped, speak]);
 
-            const handleSrs = (action) => {
+            const handleSrs = (action, e) => {
+                e.stopPropagation();
                 const card = queue[0];
-                const next = queue.slice(1);
+                let next = [...queue.slice(1)];
                 setStats(s => ({ ...s, [action]: s[action] + 1 }));
+                
                 if (action === 'again') next.splice(1, 0, card);
-                else if (action === 'hard') next.splice(Math.floor(next.length / 2), 0, card);
+                else if (action === 'hard') next.splice(Math.min(5, next.length), 0, card);
                 else if (action === 'good') next.push(card);
-                setQueue(next); setIsFlipped(false);
+                // easy 則直接不放回隊列
+                
+                setQueue(next);
+                setIsFlipped(false);
             };
 
             if (totalCards === 0) return (
-                <div className="flex flex-col items-center justify-center min-h-screen p-6">
-                    <h1 className="text-2xl font-bold mb-6 text-slate-800">日文單字學習 App</h1>
-                    <label className="bg-indigo-600 text-white px-8 py-4 rounded-2xl font-bold shadow-lg cursor-pointer">
-                        匯入 CSV 開始學習
+                <div className="flex flex-col items-center justify-center min-h-screen p-6 text-center">
+                    <div className="mb-6 p-8 bg-white rounded-full shadow-sm"><Icon name="languages" size={48} className="text-indigo-500" /></div>
+                    <h1 className="text-2xl font-bold mb-2">日文單字學習 App</h1>
+                    <p className="text-slate-400 mb-8">請上傳您的 flashcards.csv</p>
+                    <label className="bg-indigo-600 text-white px-10 py-4 rounded-2xl font-bold shadow-lg cursor-pointer active:scale-95 transition-transform">
+                        選擇檔案開始
                         <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
                     </label>
                 </div>
             );
 
             return (
-                <div className="max-w-md mx-auto p-4 min-h-screen flex flex-col">
-                    <div className="flex items-center gap-3 mb-4 bg-white p-3 rounded-xl shadow-sm border">
-                        <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                <div className="max-w-md mx-auto p-4 min-h-screen flex flex-col select-none">
+                    <div className="flex items-center gap-3 mb-4 bg-white p-3 rounded-2xl shadow-sm border border-slate-100">
+                        <span className="text-xs font-bold text-slate-400">{queue.length} 張剩餘</span>
+                        <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                             <div className="h-full bg-indigo-500 transition-all" style={{ width: `${((totalCards - queue.length) / totalCards) * 100}%` }} />
                         </div>
-                        <label className="text-indigo-500"><Icon name="upload" size={20} /><input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} /></label>
+                        <label className="text-slate-400 px-2"><Icon name="refresh-cw" size={18} /><input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} /></label>
                     </div>
+
                     {queue.length > 0 ? (
-                        <div onClick={() => setIsFlipped(!isFlipped)} className="flex-1 bg-white rounded-3xl shadow-xl border p-8 flex flex-col items-center justify-center text-center relative active:scale-95 transition-transform">
+                        <div onClick={() => setIsFlipped(!isFlipped)} className="flex-1 bg-white rounded-[2.5rem] shadow-xl border border-slate-50 p-8 flex flex-col items-center justify-center text-center relative active:scale-[0.98] transition-transform card-min-h">
                             {!isFlipped ? (
-                                <div className="space-y-4">
-                                    <h2 className="text-5xl font-black">{currentCard.front}</h2>
-                                    <Icon name="volume-2" className="text-indigo-300 mx-auto" />
+                                <div className="space-y-6">
+                                    <h2 className="text-5xl font-black text-slate-800">{currentCard.front}</h2>
+                                    <Icon name="volume-2" className="text-indigo-200 mx-auto" size={40} />
                                 </div>
                             ) : (
                                 <div className="flex flex-col h-full w-full">
-                                    <div className="flex-1 flex items-center justify-center text-xl text-slate-700 whitespace-pre-wrap">{currentCard.back.replace(/{.*?}/g, '')}</div>
-                                    <div className="grid grid-cols-2 gap-2 mt-4">
-                                        {['again', 'hard', 'good', 'easy'].map(a => <button key={a} onClick={(e) => { e.stopPropagation(); handleSrs(a); }} className="py-4 rounded-xl font-bold bg-slate-50 border capitalize active:bg-slate-100">{a}</button>)}
+                                    <div className="flex-1 flex flex-col items-center justify-center space-y-4">
+                                        <p className="text-2xl text-slate-700 font-medium whitespace-pre-wrap">{currentCard.back.replace(/{.*?}/g, '\n').trim()}</p>
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3 mt-6 w-full">
+                                        <button onClick={(e) => handleSrs('again', e)} className="py-5 rounded-2xl font-bold bg-red-50 text-red-500 active:bg-red-100">Again</button>
+                                        <button onClick={(e) => handleSrs('hard', e)} className="py-5 rounded-2xl font-bold bg-orange-50 text-orange-500 active:bg-orange-100">Hard</button>
+                                        <button onClick={(e) => handleSrs('good', e)} className="py-5 rounded-2xl font-bold bg-blue-50 text-blue-500 active:bg-blue-100">Good</button>
+                                        <button onClick={(e) => handleSrs('easy', e)} className="py-5 rounded-2xl font-bold bg-green-50 text-green-500 active:bg-green-100">Easy</button>
                                     </div>
                                 </div>
                             )}
                         </div>
                     ) : (
-                        <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center">
-                            <Icon name="check-circle" size={64} className="text-green-500" />
-                            <h2 className="text-xl font-bold">複習完了！</h2>
-                            <button onClick={() => { localStorage.clear(); location.reload(); }} className="text-indigo-500">清除進度重來</button>
+                        <div className="flex-1 flex flex-col items-center justify-center gap-6 text-center">
+                            <Icon name="party-popper" size={64} className="text-yellow-500" />
+                            <h2 className="text-2xl font-bold">太棒了！全數完成</h2>
+                            <button onClick={() => { localStorage.clear(); location.reload(); }} className="bg-slate-800 text-white px-8 py-3 rounded-xl font-bold">重新開始</button>
                         </div>
                     )}
                 </div>
